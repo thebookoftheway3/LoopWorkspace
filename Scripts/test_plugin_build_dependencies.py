@@ -54,10 +54,14 @@ class PluginBuildDependencies(unittest.TestCase):
         cls.expected = expected_plugins()
 
     def test_every_workspace_plugin_precedes_loop(self):
-        self.assertTrue(self.expected, "No plugins found: verify the selected scheme")
+        if not self.expected:
+            phases = [self.objects[p] for p in self.objects[LOOP_TARGET]["buildPhases"]]
+            self.assertFalse(any(p.get("name") == "Install Plugins" for p in phases))
         self.assertEqual(self.expected, declared_plugins(self.objects))
 
     def test_missing_edges_are_detected(self):
+        if not self.expected:
+            self.skipTest("Restricted research target has no dynamic plugin targets")
         tested = 0
         for dependency in self.objects[LOOP_TARGET]["dependencies"]:
             proxy = self.objects[self.objects[dependency]["targetProxy"]]
