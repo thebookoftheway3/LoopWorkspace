@@ -69,6 +69,20 @@ def check_untimed_evidence_wiring(transmitter, manager):
     assert "updateDelegate(with: .noData)" in callback, "Untimed evidence must reach private journal without newData"
 
 
+def check_background_recovery(bluetooth, app):
+    event = bluetooth.split("connectionEventDidOccur event:", 1)[1].split("#endif", 1)[0]
+    assert "onEvent(enabled: stayConnected" in event and "managerQueue_scanForPeripheral()" in event
+    assert ".connect(" not in event, "Connection event must not directly connect a hinted peer"
+    restoration = bluetooth.split("willRestoreState dict:", 1)[1].split("#else", 1)[0]
+    assert "restoredPeripherals = dict" in restoration, "OS restoration handles discarded"
+    assert "registerForConnectionEvents(options:" in bluetooth
+    assert "ResearchConnectionRecovery.restoredCandidate" in bluetooth and "systemConnected: connected" in bluetooth
+    assert "Locked(false)" in bluetooth, "Research transport must wait for owner consent activation"
+    assert "controller.loadViewIfNeeded()" in app, "Background launch must recreate the observer"
+    adopt = app.split("private func adopt(", 1)[1].split("func cgmManagerOnboarding", 1)[0]
+    assert "enableBackgroundObservation()" in adopt, "Cold background launch never enables observation"
+
+
 def check_sources():
     for path, names in [("CGMBLEKit/CGMBLEKit.xcodeproj/project.pbxproj", {"CGMBLEKit", "CGMBLEKitUI"}), ("dexcom-share-client-swift/ShareClient.xcodeproj/project.pbxproj", {"ShareClient", "ShareClientUI"}), ("Loop/Loop.xcodeproj/project.pbxproj", {"Loop"})]:
         check_flags(project(ROOT / path), names)
@@ -80,6 +94,7 @@ def check_sources():
     assert sources == {"Research/ResearchApp.swift", "Research/ResearchPolicy.swift", "Research/ResearchObservation.swift"}, sources
     assert not target["dependencies"], "Unexpected target dependency"
     assert plistlib.loads((ROOT / "Loop/Research/Research.entitlements").read_bytes()) == {}
+    assert plistlib.loads((ROOT / "Loop/Research/Info.plist").read_bytes())["UIBackgroundModes"] == ["bluetooth-central"]
     for scheme in ["LoopG6Research", "LoopWorkspace"]:
         xml = ET.parse(ROOT / f"LoopWorkspace.xcworkspace/xcshareddata/xcschemes/{scheme}.xcscheme")
         names = {r.attrib["BlueprintName"] for r in xml.findall(".//BuildActionEntry/BuildableReference")}
@@ -107,6 +122,17 @@ def check_sources():
     assert "[CGMServiceCharacteristicUUID.control]" in subscription and ".authentication" not in subscription, "Research subscription must be control-only"
     app = (ROOT / "Loop/Research/ResearchApp.swift").read_text()
     check_foreground_collection(app)
+    peripheral = (ROOT / "CGMBLEKit/CGMBLEKit/PeripheralManager.swift").read_text()
+    assert peripheral.count("ResearchPeripheralConfiguration.invalidate(on: queue)") == 2
+    assert "#if !LIVE_READ_ONLY\n        assertConfiguration()" in peripheral, "Discovery must wait for research delegate attachment"
+    check_background_recovery(bluetooth, app)
+    for broken in [bluetooth.replace("onEvent(enabled: stayConnected", "onEvent(enabled: true"), bluetooth.replace("restoredPeripherals = dict", "discarded = dict")]:
+        try:
+            check_background_recovery(broken, app)
+        except AssertionError:
+            pass
+        else:
+            raise AssertionError("Negative background recovery control failed")
     try:
         check_foreground_collection(app.replace("case .newData(let samples): do {", "case .newData(let samples): do { connectionProbe.cancel();"))
     except AssertionError:
@@ -158,6 +184,9 @@ def check_app(app, unsigned):
     for name, forbidden in FORBIDDEN_SELECTORS.items():
         actual = selectors(app / "Frameworks" / f"{name}.framework" / name)
         assert not any(s in actual for s in forbidden), name + " contains forbidden transport selector"
+    cgm_selectors = selectors(app / "Frameworks/CGMBLEKit.framework/CGMBLEKit")
+    assert "registerForConnectionEventsWithOptions:" in cgm_selectors
+    assert "centralManager:connectionEventDidOccur:forPeripheral:" in cgm_selectors
     if not unsigned:
         result = subprocess.run(["codesign", "-d", "--entitlements", "-", "--xml", str(app)], capture_output=True, check=True)
         assert plistlib.loads(result.stdout) == {}
