@@ -6,10 +6,10 @@
 	url = https://github.com/LoopKit/LoopKit.git
 [submodule "CGMBLEKit"]
 	path = CGMBLEKit
-	url = https://github.com/LoopKit/CGMBLEKit.git
+	url = https://github.com/thebookoftheway3/CGMBLEKit.git
 [submodule "dexcom-share-client-swift"]
 	path = dexcom-share-client-swift
-	url = https://github.com/LoopKit/dexcom-share-client-swift.git
+	url = https://github.com/thebookoftheway3/dexcom-share-client-swift.git
 [submodule "RileyLinkKit"]
 	path = RileyLinkKit
 	url = https://github.com/LoopKit/RileyLinkKit
