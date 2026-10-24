@@ -53,6 +53,14 @@ def check_passive_readiness_wiring(transmitter):
     assert "try peripheral.listenToCharacteristic(characteristic)" in research, "Subscription plan is not connected to the actual notification helper"
 
 
+def check_foreground_collection(app):
+    new_data = app.split("case .newData(let samples):", 1)[1].split("case .unreliableData", 1)[0].split("catch", 1)[0]
+    assert "invalidate()" not in new_data and "cancel()" not in new_data, "A valid reading stops collection"
+    lookup = app.split("private func attemptExistingConnection()", 1)[1].split("private func refreshConnectionDiagnostics()", 1)[0]
+    assert "manager.transmitter.resumeScanning()" in lookup and "fetchNewDataIfNeeded" not in lookup, "Lookup must not rebuild the journal and chart every second"
+    assert "UIApplication.didBecomeActiveNotification" in app and 'bool(forKey: "researchCollectionPaused")' in app, "Automatic resume must honor owner pause"
+
+
 def check_untimed_evidence_wiring(transmitter, manager):
     branch = transmitter.split("case .untimed:", 1)[1].split("case .timed", 1)[0]
     assert "notifyResearchEvidenceUpdated()" in branch and "didRead:" not in branch, "Untimed evidence must notify without becoming a timed reading"
@@ -95,6 +103,16 @@ def check_sources():
     else:
         raise AssertionError("Negative untimed journal-notification control failed")
     check_passive_readiness_wiring(transmitter)
+    subscription = transmitter.split("enum ResearchPassiveSubscriptions", 1)[1].split("public final class Transmitter", 1)[0]
+    assert "[CGMServiceCharacteristicUUID.control]" in subscription and ".authentication" not in subscription, "Research subscription must be control-only"
+    app = (ROOT / "Loop/Research/ResearchApp.swift").read_text()
+    check_foreground_collection(app)
+    try:
+        check_foreground_collection(app.replace("case .newData(let samples): do {", "case .newData(let samples): do { connectionProbe.cancel();"))
+    except AssertionError:
+        pass
+    else:
+        raise AssertionError("Negative successful-reading cancellation control failed")
     try:
         check_passive_readiness_wiring(transmitter.replace("ResearchPassiveSubscriptions.subscribe(stillObserving:", "disabledSubscription(stillObserving:"))
     except AssertionError:
