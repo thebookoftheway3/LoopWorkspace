@@ -53,6 +53,14 @@ def check_passive_readiness_wiring(transmitter):
     assert "try peripheral.listenToCharacteristic(characteristic)" in research, "Subscription plan is not connected to the actual notification helper"
 
 
+def check_untimed_evidence_wiring(transmitter, manager):
+    branch = transmitter.split("case .untimed:", 1)[1].split("case .timed", 1)[0]
+    assert "notifyResearchEvidenceUpdated()" in branch and "didRead:" not in branch, "Untimed evidence must notify without becoming a timed reading"
+    assert "hasClock: lastTimeMessage != nil && activationDate != nil" in transmitter, "Observed clock prerequisites missing"
+    callback = manager.split("func transmitterDidUpdateResearchEvidence", 1)[1].split("}", 1)[0]
+    assert "updateDelegate(with: .noData)" in callback, "Untimed evidence must reach private journal without newData"
+
+
 def check_sources():
     for path, names in [("CGMBLEKit/CGMBLEKit.xcodeproj/project.pbxproj", {"CGMBLEKit", "CGMBLEKitUI"}), ("dexcom-share-client-swift/ShareClient.xcodeproj/project.pbxproj", {"ShareClient", "ShareClientUI"}), ("Loop/Loop.xcodeproj/project.pbxproj", {"Loop"})]:
         check_flags(project(ROOT / path), names)
@@ -78,6 +86,14 @@ def check_sources():
     else:
         raise AssertionError("Negative pending-connection control failed")
     transmitter = (ROOT / "CGMBLEKit/CGMBLEKit/Transmitter.swift").read_text()
+    manager = (ROOT / "CGMBLEKit/CGMBLEKit/TransmitterManager.swift").read_text()
+    check_untimed_evidence_wiring(transmitter, manager)
+    try:
+        check_untimed_evidence_wiring(transmitter.replace("notifyResearchEvidenceUpdated()", "disabledEvidenceNotification()"), manager)
+    except AssertionError:
+        pass
+    else:
+        raise AssertionError("Negative untimed journal-notification control failed")
     check_passive_readiness_wiring(transmitter)
     try:
         check_passive_readiness_wiring(transmitter.replace("ResearchPassiveSubscriptions.subscribe(stillObserving:", "disabledSubscription(stillObserving:"))
