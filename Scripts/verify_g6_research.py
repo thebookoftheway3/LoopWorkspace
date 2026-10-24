@@ -83,6 +83,14 @@ def check_background_recovery(bluetooth, app):
     assert "enableBackgroundObservation()" in adopt, "Cold background launch never enables observation"
 
 
+def check_reconnect_cooldown(bluetooth):
+    lookup = bluetooth.split("private func managerQueue_scanForPeripheral()", 1)[1].split("let currentState", 1)[0]
+    assert "guard reconnectCooldown.permitsLookup(at: ProcessInfo.processInfo.systemUptime) else { return }" in lookup, "Event or poll lookup bypasses reconnect cooldown"
+    retry = bluetooth.split("fileprivate func scanAfterDelay()", 1)[1].split("#else", 1)[0]
+    assert "reconnectCooldown.disconnected(at: ProcessInfo.processInfo.systemUptime)" in retry
+    assert "asyncAfter(deadline: .now() + 2)" in retry, "Disconnect immediately retries attachment"
+
+
 def check_sources():
     for path, names in [("CGMBLEKit/CGMBLEKit.xcodeproj/project.pbxproj", {"CGMBLEKit", "CGMBLEKitUI"}), ("dexcom-share-client-swift/ShareClient.xcodeproj/project.pbxproj", {"ShareClient", "ShareClientUI"}), ("Loop/Loop.xcodeproj/project.pbxproj", {"Loop"})]:
         check_flags(project(ROOT / path), names)
@@ -126,6 +134,14 @@ def check_sources():
     assert peripheral.count("ResearchPeripheralConfiguration.invalidate(on: queue)") == 2
     assert "#if !LIVE_READ_ONLY\n        assertConfiguration()" in peripheral, "Discovery must wait for research delegate attachment"
     check_background_recovery(bluetooth, app)
+    check_reconnect_cooldown(bluetooth)
+    for broken in [bluetooth.replace("guard reconnectCooldown.permitsLookup(at: ProcessInfo.processInfo.systemUptime) else { return }", ""), bluetooth.replace("asyncAfter(deadline: .now() + 2)", "async")]:
+        try:
+            check_reconnect_cooldown(broken)
+        except AssertionError:
+            pass
+        else:
+            raise AssertionError("Negative reconnect cooldown control failed")
     for broken in [bluetooth.replace("onEvent(enabled: stayConnected", "onEvent(enabled: true"), bluetooth.replace("restoredPeripherals = dict", "discarded = dict")]:
         try:
             check_background_recovery(broken, app)
