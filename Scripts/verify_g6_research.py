@@ -40,6 +40,12 @@ def check_stopped_gate(bluetooth):
     assert "guard stayConnected else { return }" in queue_body, "Stopped observer can retry"
 
 
+def check_connecting_gate(bluetooth):
+    body = bluetooth.split("private func managerQueue_scanForPeripheral()", 1)[1].split("#else", 1)[0]
+    guard = "guard currentState != .connecting else { return }"
+    assert guard in body and body.index(guard) < body.index("manager.connect(candidate)"), "Duplicate pending connection requests possible"
+
+
 def check_sources():
     for path, names in [("CGMBLEKit/CGMBLEKit.xcodeproj/project.pbxproj", {"CGMBLEKit", "CGMBLEKitUI"}), ("dexcom-share-client-swift/ShareClient.xcodeproj/project.pbxproj", {"ShareClient", "ShareClientUI"}), ("Loop/Loop.xcodeproj/project.pbxproj", {"Loop"})]:
         check_flags(project(ROOT / path), names)
@@ -57,6 +63,13 @@ def check_sources():
         assert names == {"Loop", "LoopKit", "LoopKitUI"}, names
     bluetooth = (ROOT / "CGMBLEKit/CGMBLEKit/BluetoothManager.swift").read_text()
     check_stopped_gate(bluetooth)
+    check_connecting_gate(bluetooth)
+    try:
+        check_connecting_gate(bluetooth.replace("guard currentState != .connecting else { return }", ""))
+    except AssertionError:
+        pass
+    else:
+        raise AssertionError("Negative pending-connection control failed")
     transmitter = (ROOT / "CGMBLEKit/CGMBLEKit/Transmitter.swift").read_text()
     stop_body = transmitter.split("public func stopScanning()", 1)[1].split("public var isScanning", 1)[0]
     assert stop_body.index("stayConnected = false") < stop_body.index("disconnect()"), "Stop must disable queued reconnects before disconnect"
