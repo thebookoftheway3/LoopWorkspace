@@ -46,6 +46,13 @@ def check_connecting_gate(bluetooth):
     assert guard in body and body.index(guard) < body.index("manager.connect(candidate)"), "Duplicate pending connection requests possible"
 
 
+def check_passive_readiness_wiring(transmitter):
+    body = transmitter.split("isReadyWithError error: Error?)", 1)[1].split("func bluetoothManager(_ manager: BluetoothManager, shouldConnectPeripheral", 1)[0]
+    research = body.split("if self.passiveModeEnabled", 1)[1].split("#else", 1)[0]
+    assert "ResearchPassiveSubscriptions.subscribe(stillObserving:" in research, "Passive readiness does not enable control observation"
+    assert "try peripheral.listenToCharacteristic(characteristic)" in research, "Subscription plan is not connected to the actual notification helper"
+
+
 def check_sources():
     for path, names in [("CGMBLEKit/CGMBLEKit.xcodeproj/project.pbxproj", {"CGMBLEKit", "CGMBLEKitUI"}), ("dexcom-share-client-swift/ShareClient.xcodeproj/project.pbxproj", {"ShareClient", "ShareClientUI"}), ("Loop/Loop.xcodeproj/project.pbxproj", {"Loop"})]:
         check_flags(project(ROOT / path), names)
@@ -71,6 +78,13 @@ def check_sources():
     else:
         raise AssertionError("Negative pending-connection control failed")
     transmitter = (ROOT / "CGMBLEKit/CGMBLEKit/Transmitter.swift").read_text()
+    check_passive_readiness_wiring(transmitter)
+    try:
+        check_passive_readiness_wiring(transmitter.replace("ResearchPassiveSubscriptions.subscribe(stillObserving:", "disabledSubscription(stillObserving:"))
+    except AssertionError:
+        pass
+    else:
+        raise AssertionError("Negative passive-readiness wiring control failed")
     stop_body = transmitter.split("public func stopScanning()", 1)[1].split("public var isScanning", 1)[0]
     assert stop_body.index("stayConnected = false") < stop_body.index("disconnect()"), "Stop must disable queued reconnects before disconnect"
     # Synthetic source regression exercises the same check after removing the queue gate.
